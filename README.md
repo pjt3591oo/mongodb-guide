@@ -656,3 +656,69 @@ a, b, c, d 인덱스가 생성되었을 경우
 ```
 
 index prefix는 복합 인덱스에서 동작하지만 index intersection은 단일 인덱스에서 적용된다. index intersection이 이루어지면 explain() 결과에서 AND_SORTED 또는 AND_HASH를 발견할 수 있다. 이 둘이 존재한다면 교차 인덱스가 작동된것이다.
+
+## 백업(dump), 복구(restore)
+
+* 전체백업
+
+```bash
+$ mongodump --out [dump data path] --host 127.0.0.1 --port 27017 -u [username] -p [password]
+```
+
+* 특정 디비 백업
+
+```bash
+$ mongodump --out [dump data path] --host 127.0.0.1 --port 27017 -u [username] -p [password] --db [덤프할 db명]
+```
+
+* 특정 디비의 컬렉션 백업
+
+```bash
+$ mongodump --out [dump data path] --host [dbhost] --port 27017 -u [username] -p [password] --db [dbname] --collection [collectionName]
+```
+
+* example
+
+```bash
+$ mongodump --out t --host 127.0.0.1 --port 27017 -u admin -p admin
+
+2022-03-08T06:11:03.507+0000	writing admin.system.users to t/admin/system.users.bson
+2022-03-08T06:11:03.509+0000	done dumping admin.system.users (1 document)
+2022-03-08T06:11:03.509+0000	writing admin.system.version to t/admin/system.version.bson
+2022-03-08T06:11:03.511+0000	done dumping admin.system.version (2 documents)
+2022-03-08T06:11:03.512+0000	writing testdb.post to t/testdb/post.bson
+2022-03-08T06:11:03.514+0000	done dumping testdb.post (29 documents)
+2022-03-08T06:11:03.515+0000	writing testdb.collections to t/testdb/collections.bson
+2022-03-08T06:11:03.517+0000	done dumping testdb.collections (2 documents)
+
+$ ls
+t
+
+$ cd t
+$ ls
+admin  testdb
+
+$ cd testdb
+$ ls
+collections.bson  collections.metadata.json  post.bson  post.metadata.json
+```
+
+* 복구(restore) 명령어 구조
+
+```bash
+$ mongorestore --host 127.0.0.1 --port 27017 -u [username] -p [password --drop [drop db name] --db [복구할 db name] [복구할 덤프데이터가 있는 디렉토리]
+```
+
+* 전체 복구(restore)
+
+```bash
+$ mongorestore --host 127.0.0.1 --port 27017 [dump data가 있는 디렉토리]
+```
+
+* 특정 컬렉션 복구(restore)
+
+```bash
+$ mongorestore --host <dbhost> --port 27017 --db [dbname] --collection [collectionName] [data-dump-path/dbname/collection.bson] --drop [drop db name]
+```
+
+컬렉션 단위로 복구하기 위해 --collection 옵션을 사용하여 collection.bson까지 경로를 입력해야한다.
