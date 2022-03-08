@@ -178,7 +178,7 @@ $nin : 주어빈 배열 안에 속하지 않는 값
 ```
 
 ```
-> db.pst.find( { likes: { $gt: 10, $lt: 30 } } )
+> db.post.find( { likes: { $gt: 10, $lt: 30 } } )
 ```
 
 ```
@@ -255,7 +255,7 @@ find()는 cursor를 반환한다. 커서는 sort, limit, offset을 사용할 수
 { "_id" : ObjectId("6226b57732dbdd01d1ee9b12"), "title" : "title3", "author" : "mung3" }
 { "_id" : ObjectId("6226b57b32dbdd01d1ee9b13"), "title" : "title3", "author" : "mung3" }
 { "_id" : ObjectId("6226b57c32dbdd01d1ee9b14"), "title" : "title2", "author" : "mung2" }
-{ "_id" : ObjectId("6226b57d32dbdd01d1ee9b15"), "title" : "title1", "author" : "mung1"
+{ "_id" : ObjectId("6226b57d32dbdd01d1ee9b15"), "title" : "title1", "author" : "mung1" }
 ```
 
 * document(row) 갯수 조회
@@ -449,7 +449,7 @@ https://docs.mongodb.com/manual/reference/sql-aggregation-comparison/
 
 인덱스타입: 고유인덱스, 희소인덱스, 다중키 인덱스, 해시 인덱스, 지리 공간적 인덱스, 단일컬럼 인덱스
 
-* 단일컬럼인덱스
+* 단일컬럼인덱스(Single Field Index)
 
 ```
 > db.콜렉션이름.createIndex({컬럼명: 정렬방향})
@@ -461,7 +461,7 @@ https://docs.mongodb.com/manual/reference/sql-aggregation-comparison/
 
 1은 오름차순, -1은 내림차순
 
-* 복합인덱스
+* 복합인덱스(Compound Index)
 
 ```
 > db.콜렉션이름.createIndex({컬럼명: 정렬방향, 컬럼명: 정렬방향})
@@ -591,13 +591,13 @@ explain("allPlansExecution mode"): queryPlanner + executionStats 내용 모두 �
 인덱스도 저장 공간을 차지함
 
 ```
-$ db.[콜렉션이름].totalIndexSize()
+> db.[콜렉션이름].totalIndexSize()
 ```
 
 * 인덱스 제거
 
 ```
-> db.[콜렉션이름].dropIndex(필드이름);
+> db.[콜렉션이름].dropIndex(필드이름)
 ```
 
 
@@ -722,3 +722,5 @@ $ mongorestore --host <dbhost> --port 27017 --db [dbname] --collection [collecti
 ```
 
 컬렉션 단위로 복구하기 위해 --collection 옵션을 사용하여 collection.bson까지 경로를 입력해야한다.
+
+## 맵 리듀스
