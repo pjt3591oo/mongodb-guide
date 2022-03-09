@@ -1,5 +1,21 @@
 # mongodb 
 
+### 구성요소
+
+1. 환경구성
+
+2. CRUD
+
+3. aggregate
+
+4. index
+
+5. dump, restore
+
+6. lock & transaction
+
+7. mapReduce
+
 ## 준비
 
 * 컨테이너 생성
