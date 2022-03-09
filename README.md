@@ -264,6 +264,30 @@ find()는 cursor를 반환한다. 커서는 sort, limit, offset을 사용할 수
 > db.post.find().count()
 ```
 
+* document(row) 수정
+
+```
+> db.collection.update( filter, update, options )
+```
+
+옵션은 다음과 같은 구조를 가진다.
+
+```js
+{
+  projection: <document>,
+  sort: <document>,
+  maxTimeMS: <number>,
+  upsert: <boolean>,
+  returnNewDocument: <boolean>,
+  collation: <document>,
+  arrayFilters: [ <filterdocument1>, ... ]
+}
+```
+
+```
+> db.post.update({author: "mung1"}, {author: "mung-mung1"}, {upsert: true})
+```
+
 * document(row) 삭제
 
 ```
@@ -723,4 +747,696 @@ $ mongorestore --host <dbhost> --port 27017 --db [dbname] --collection [collecti
 
 컬렉션 단위로 복구하기 위해 --collection 옵션을 사용하여 collection.bson까지 경로를 입력해야한다.
 
-## 맵 리듀스
+## 잠금(lock) 및 트랜잭션(Transaction)
+
+몽고디비는 2가지 잠금이 존재.
+
+1. 명시적 잠금
+
+2. 묵시적 잠금: 데이터베이스와 컬렉션을 잠그는 목적으로 사용. 쿼리 수행시 자동으로 잠금을 획득하고 반환함
+
+* 잠금수행
+
+```
+> db.fsyncLock({ fsync: 1, lock: true })
+{
+	"info" : "now locked against writes, use db.fsyncUnlock() to unlock",
+	"lockCount" : NumberLong(1),
+	"seeAlso" : "http://dochub.mongodb.org/core/fsynccommand",
+	"ok" : 1
+}
+```
+
+잠긴 상태에서 insert 및 update를 수행하면 대기상태가 된다.
+
+```
+> db.post.insert({title: "title123", author: "mung123" })
+```
+
+* 잠금상태 확인
+
+```
+> db.currentOp()
+```
+
+* 잠금풀기
+
+```
+> db.fsyncUnlock()
+{ "info" : "fsyncUnlock completed", "lockCount" : NumberLong(1), "ok" : 1 }
+```
+
+* 엔진에 따른 잠금개념
+
+몽고디비는 2가지 형태의 스토리지를 제공한다
+
+```
+MMAPv1 스토리지 : collection 수준의 잠금 제공
+
+WiredTiger 스토리지: document 수준 잠금 제공
+```
+
+* 트랜잭션
+
+
+몽고디비는 트랜잭션이 주된 목적은 아닙니다. MMAPv1 스토리지 엔진은 트랜잭션을 사용하지 않는다. 
+
+4.x에서 WiredTiger 스토리지 엔진이 추가되면서 스냅샷 기반인 Repeatable-Read 기반의 트랜잭션을 제공한다
+
+
+또한 몽고디비에서 트랜잭션을 사용하기 위해선 replica sets 또는 shared clusters 환경이어야한다. 
+
+하지만 기본적으론 standalone으로 구동하므로 트랜잭션을 사용할 순 없다.
+
+* replica set 모드 변경
+
+docker-compose를 이용하여 3개의 몽고디비 서버를 실행한다.
+
+```yaml
+version: '3'
+
+services:
+
+  cfgsvr1:
+    container_name: mongodb.mung1.com
+    image: mongo
+    command: mongod --configsvr --replSet cfgrs --port 27017 --dbpath /data/db
+    ports:
+      - 40001:27017
+    volumes:
+      - mung1:/data/db
+
+  cfgsvr2:
+    container_name: mongodb.mung2.com
+    image: mongo
+    command: mongod --configsvr --replSet cfgrs --port 27017 --dbpath /data/db
+    ports:
+      - 40002:27017
+    volumes:
+      - mung2:/data/db
+
+  cfgsvr3:
+    container_name: mongodb.mung3.com
+    image: mongo
+    command: mongod --configsvr --replSet cfgrs --port 27017 --dbpath /data/db
+    ports:
+      - 40003:27017
+    volumes:
+      - mung3:/data/db
+
+volumes:
+  mung1: {}
+  mung2: {}
+  mung3: {}
+```
+
+도커 컴포즈를 실행한다.
+
+```bash
+$ docker-compose up
+```
+
+```bash
+$ docker ps
+
+CONTAINER ID   IMAGE     COMMAND                  CREATED          STATUS          PORTS                                           NAMES
+4b4ed212c177   mongo     "docker-entrypoint.s…"   18 seconds ago   Up 17 seconds   0.0.0.0:40003->27017/tcp, :::40003->27017/tcp   mongodb.mung3.com
+fcb6babd03c4   mongo     "docker-entrypoint.s…"   18 seconds ago   Up 17 seconds   0.0.0.0:40001->27017/tcp, :::40001->27017/tcp   mongodb.mung1.com
+ca32cc56c5da   mongo     "docker-entrypoint.s…"   18 seconds ago   Up 17 seconds   0.0.0.0:40002->27017/tcp, :::40002->27017/tcp   mongodb.mung2.com
+```
+
+컨테이너를 접속한다.
+
+```
+$ docker exec -it mongodb.mung1.com /bin/bash
+```
+
+```js
+> rs.initiate(
+  {
+    _id: "cfgrs",
+    configsvr: true,
+    members: [
+      { _id : 0, host : "mongodb.mung1.com:27017" },
+      { _id : 1, host : "mongodb.mung2.com:27017" },
+      { _id : 2, host : "mongodb.mung3.com:27017" }
+    ]
+  }
+)
+
+{
+	"ok" : 1,
+	"$gleStats" : {
+		"lastOpTime" : Timestamp(1646784051, 1),
+		"electionId" : ObjectId("000000000000000000000000")
+	},
+	"lastCommittedOpTime" : Timestamp(1646784051, 1),
+	"$clusterTime" : {
+		"clusterTime" : Timestamp(1646784051, 1),
+		"signature" : {
+			"hash" : BinData(0,"AAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+			"keyId" : NumberLong(0)
+		}
+	},
+	"operationTime" : Timestamp(1646784051, 1)
+}
+
+cfgrs:SECONDARY>
+```
+
+도커컴포즈로 실행된 컨테이너는 같은 네트워크 브릿지를 사용하기 떄문에 컨테이너 이름으로 통신이 가능하다. 
+
+replica-set 설정이 마쳐지면 터미널의 `>` 은 `replica-set 이름:primary|secondary|arbeiter` 형태로 바뀝니다.
+
+* replica-set 정보확인
+
+```js
+cfgrs:PRIMARY> rs.conf()
+
+{
+	"_id" : "cfgrs",
+	"version" : 1,
+	"term" : 1,
+	"members" : [
+		{
+			"_id" : 0,
+			"host" : "mongodb.mung1.com:27017",
+			"arbiterOnly" : false,
+			"buildIndexes" : true,
+			"hidden" : false,
+			"priority" : 1,
+			"tags" : {
+
+			},
+			"secondaryDelaySecs" : NumberLong(0),
+			"votes" : 1
+		},
+		{
+			"_id" : 1,
+			"host" : "mongodb.mung2.com:27017",
+			"arbiterOnly" : false,
+			"buildIndexes" : true,
+			"hidden" : false,
+			"priority" : 1,
+			"tags" : {
+
+			},
+			"secondaryDelaySecs" : NumberLong(0),
+			"votes" : 1
+		},
+		{
+			"_id" : 2,
+			"host" : "mongodb.mung3.com:27017",
+			"arbiterOnly" : false,
+			"buildIndexes" : true,
+			"hidden" : false,
+			"priority" : 1,
+			"tags" : {
+
+			},
+			"secondaryDelaySecs" : NumberLong(0),
+			"votes" : 1
+		}
+	],
+	"configsvr" : true,
+	"protocolVersion" : NumberLong(1),
+	"writeConcernMajorityJournalDefault" : true,
+	"settings" : {
+		"chainingAllowed" : true,
+		"heartbeatIntervalMillis" : 2000,
+		"heartbeatTimeoutSecs" : 10,
+		"electionTimeoutMillis" : 10000,
+		"catchUpTimeoutMillis" : -1,
+		"catchUpTakeoverDelayMillis" : 30000,
+		"getLastErrorModes" : {
+
+		},
+		"getLastErrorDefaults" : {
+			"w" : 1,
+			"wtimeout" : 0
+		},
+		"replicaSetId" : ObjectId("6227ee3305cb095b08afb2a4")
+	}
+}
+```
+
+```js
+cfgrs:PRIMARY> rs.status()
+
+{
+	"set" : "cfgrs",
+	"date" : ISODate("2022-03-09T00:06:05.284Z"),
+	"myState" : 1,
+	"term" : NumberLong(1),
+	"syncSourceHost" : "",
+	"syncSourceId" : -1,
+	"configsvr" : true,
+	"heartbeatIntervalMillis" : NumberLong(2000),
+	"majorityVoteCount" : 2,
+	"writeMajorityCount" : 2,
+	"votingMembersCount" : 3,
+	"writableVotingMembersCount" : 3,
+	"optimes" : {
+		"lastCommittedOpTime" : {
+			"ts" : Timestamp(1646784365, 1),
+			"t" : NumberLong(1)
+		},
+		"lastCommittedWallTime" : ISODate("2022-03-09T00:06:05.020Z"),
+		"readConcernMajorityOpTime" : {
+			"ts" : Timestamp(1646784365, 1),
+			"t" : NumberLong(1)
+		},
+		"appliedOpTime" : {
+			"ts" : Timestamp(1646784365, 1),
+			"t" : NumberLong(1)
+		},
+		"durableOpTime" : {
+			"ts" : Timestamp(1646784365, 1),
+			"t" : NumberLong(1)
+		},
+		"lastAppliedWallTime" : ISODate("2022-03-09T00:06:05.020Z"),
+		"lastDurableWallTime" : ISODate("2022-03-09T00:06:05.020Z")
+	},
+	"lastStableRecoveryTimestamp" : Timestamp(1646784351, 1),
+	"electionCandidateMetrics" : {
+		"lastElectionReason" : "electionTimeout",
+		"lastElectionDate" : ISODate("2022-03-09T00:01:02.257Z"),
+		"electionTerm" : NumberLong(1),
+		"lastCommittedOpTimeAtElection" : {
+			"ts" : Timestamp(1646784051, 1),
+			"t" : NumberLong(-1)
+		},
+		"lastSeenOpTimeAtElection" : {
+			"ts" : Timestamp(1646784051, 1),
+			"t" : NumberLong(-1)
+		},
+		"numVotesNeeded" : 2,
+		"priorityAtElection" : 1,
+		"electionTimeoutMillis" : NumberLong(10000),
+		"numCatchUpOps" : NumberLong(0),
+		"newTermStartDate" : ISODate("2022-03-09T00:01:02.325Z"),
+		"wMajorityWriteAvailabilityDate" : ISODate("2022-03-09T00:01:03.290Z")
+	},
+	"members" : [
+		{
+			"_id" : 0,
+			"name" : "mongodb.mung1.com:27017",
+			"health" : 1,
+			"state" : 1,
+			"stateStr" : "PRIMARY",
+			"uptime" : 1010,
+			"optime" : {
+				"ts" : Timestamp(1646784365, 1),
+				"t" : NumberLong(1)
+			},
+			"optimeDate" : ISODate("2022-03-09T00:06:05Z"),
+			"lastAppliedWallTime" : ISODate("2022-03-09T00:06:05.020Z"),
+			"lastDurableWallTime" : ISODate("2022-03-09T00:06:05.020Z"),
+			"syncSourceHost" : "",
+			"syncSourceId" : -1,
+			"infoMessage" : "",
+			"electionTime" : Timestamp(1646784062, 1),
+			"electionDate" : ISODate("2022-03-09T00:01:02Z"),
+			"configVersion" : 1,
+			"configTerm" : 1,
+			"self" : true,
+			"lastHeartbeatMessage" : ""
+		},
+		{
+			"_id" : 1,
+			"name" : "mongodb.mung2.com:27017",
+			"health" : 1,
+			"state" : 2,
+			"stateStr" : "SECONDARY",
+			"uptime" : 313,
+			"optime" : {
+				"ts" : Timestamp(1646784364, 1),
+				"t" : NumberLong(1)
+			},
+			"optimeDurable" : {
+				"ts" : Timestamp(1646784364, 1),
+				"t" : NumberLong(1)
+			},
+			"optimeDate" : ISODate("2022-03-09T00:06:04Z"),
+			"optimeDurableDate" : ISODate("2022-03-09T00:06:04Z"),
+			"lastAppliedWallTime" : ISODate("2022-03-09T00:06:05.020Z"),
+			"lastDurableWallTime" : ISODate("2022-03-09T00:06:05.020Z"),
+			"lastHeartbeat" : ISODate("2022-03-09T00:06:04.733Z"),
+			"lastHeartbeatRecv" : ISODate("2022-03-09T00:06:03.715Z"),
+			"pingMs" : NumberLong(0),
+			"lastHeartbeatMessage" : "",
+			"syncSourceHost" : "mongodb.mung1.com:27017",
+			"syncSourceId" : 0,
+			"infoMessage" : "",
+			"configVersion" : 1,
+			"configTerm" : 1
+		},
+		{
+			"_id" : 2,
+			"name" : "mongodb.mung3.com:27017",
+			"health" : 1,
+			"state" : 2,
+			"stateStr" : "SECONDARY",
+			"uptime" : 313,
+			"optime" : {
+				"ts" : Timestamp(1646784364, 1),
+				"t" : NumberLong(1)
+			},
+			"optimeDurable" : {
+				"ts" : Timestamp(1646784364, 1),
+				"t" : NumberLong(1)
+			},
+			"optimeDate" : ISODate("2022-03-09T00:06:04Z"),
+			"optimeDurableDate" : ISODate("2022-03-09T00:06:04Z"),
+			"lastAppliedWallTime" : ISODate("2022-03-09T00:06:05.020Z"),
+			"lastDurableWallTime" : ISODate("2022-03-09T00:06:05.020Z"),
+			"lastHeartbeat" : ISODate("2022-03-09T00:06:04.734Z"),
+			"lastHeartbeatRecv" : ISODate("2022-03-09T00:06:03.717Z"),
+			"pingMs" : NumberLong(0),
+			"lastHeartbeatMessage" : "",
+			"syncSourceHost" : "mongodb.mung1.com:27017",
+			"syncSourceId" : 0,
+			"infoMessage" : "",
+			"configVersion" : 1,
+			"configTerm" : 1
+		}
+	],
+	"ok" : 1,
+	"$gleStats" : {
+		"lastOpTime" : Timestamp(1646784051, 1),
+		"electionId" : ObjectId("7fffffff0000000000000001")
+	},
+	"lastCommittedOpTime" : Timestamp(1646784365, 1),
+	"$clusterTime" : {
+		"clusterTime" : Timestamp(1646784365, 1),
+		"signature" : {
+			"hash" : BinData(0,"AAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+			"keyId" : NumberLong(0)
+		}
+	},
+	"operationTime" : Timestamp(1646784365, 1)
+}
+```
+
+* 마스터 확인
+
+```js
+cfgrs:PRIMARY> db.isMaster()
+
+{
+	"topologyVersion" : {
+		"processId" : ObjectId("6227eb7b05cb095b08afb25f"),
+		"counter" : NumberLong(6)
+	},
+	"hosts" : [
+		"mongodb.mung1.com:27017",
+		"mongodb.mung2.com:27017",
+		"mongodb.mung3.com:27017"
+	],
+	"setName" : "cfgrs",
+	"setVersion" : 1,
+	"ismaster" : true,
+	"secondary" : false,
+	"primary" : "mongodb.mung1.com:27017",
+	"me" : "mongodb.mung1.com:27017",
+	"electionId" : ObjectId("7fffffff0000000000000001"),
+	"lastWrite" : {
+		"opTime" : {
+			"ts" : Timestamp(1646784324, 1),
+			"t" : NumberLong(1)
+		},
+		"lastWriteDate" : ISODate("2022-03-09T00:05:24Z"),
+		"majorityOpTime" : {
+			"ts" : Timestamp(1646784324, 1),
+			"t" : NumberLong(1)
+		},
+		"majorityWriteDate" : ISODate("2022-03-09T00:05:24Z")
+	},
+	"configsvr" : 2,
+	"maxBsonObjectSize" : 16777216,
+	"maxMessageSizeBytes" : 48000000,
+	"maxWriteBatchSize" : 100000,
+	"localTime" : ISODate("2022-03-09T00:05:25.631Z"),
+	"logicalSessionTimeoutMinutes" : 30,
+	"connectionId" : 1,
+	"minWireVersion" : 0,
+	"maxWireVersion" : 13,
+	"readOnly" : false,
+	"ok" : 1,
+	"$gleStats" : {
+		"lastOpTime" : Timestamp(1646784051, 1),
+		"electionId" : ObjectId("7fffffff0000000000000001")
+	},
+	"lastCommittedOpTime" : Timestamp(1646784324, 1),
+	"$clusterTime" : {
+		"clusterTime" : Timestamp(1646784324, 1),
+		"signature" : {
+			"hash" : BinData(0,"AAAAAAAAAAAAAAAAAAAAAAAAAAA="),
+			"keyId" : NumberLong(0)
+		}
+	},
+	"operationTime" : Timestamp(1646784324, 1)
+}
+```
+
+* 2, 3번 서버에서 몽고디비 서버 접속
+
+```
+$ docker exec -it mongodb.mung2.com /bin/bash
+$ mongo
+
+cfgrs:SECONDARY>
+```
+
+```
+$ docker exec -it mongodb.mung2.com /bin/bash
+$ mongo
+
+cfgrs:SECONDARY>
+```
+
+2, 3번 몽고디비 서버는 SECONDARY 입니다.
+
+* 트랜잭션 수행
+
+트랜잭션 수행을 위해 다음과 같은 절차를 수행한다.
+
+1. 세션 생성
+
+2. startTransaction 호출
+
+3. 쿼리수행
+
+4. commitTransaction 호출
+
+5 세션 종료
+
+다음 쿼리는 PRIMARY에서 수행해야 한다.
+
+```js
+> session = db.getMongo().startSession()
+> session.startTransaction({readConcern: {level: 'snapshot'}, writeConcern: {w: 'majority'}});
+> post = session.getDatabase('데이터베이스 이름').getCollection('콜렉션 이름')
+
+// 수행하기 원하는 작업들
+
+> session.commitTransaction();
+> session.endSession();
+```
+
+```js
+cfgrs:PRIMARY> use admin 
+cfgrs:PRIMARY> session = db.getMongo().startSession()
+cfgrs:PRIMARY> session.startTransaction({readConcern: {level: 'snapshot'}, writeConcern: {w: 'majority'}});
+cfgrs:PRIMARY> post = session.getDatabase('admin').getCollection('post')
+
+cfgrs:PRIMARY> post.insert({title:"1", author: "2"}, {session: session}) // 해당 세션에서 스냅샷이 생성됨
+
+cfgrs:PRIMARY> session.commitTransaction(); // 커밋시
+cfgrs:PRIMARY> session.abortTransaction(); // 롤백시
+cfgrs:PRIMARY> session.endSession();
+```
+
+추가된 데이터는 SECONDARY에서도 확인가능
+
+```js
+cfgrs:SECONDARY> rs.secondaryOk() # 수행하지 않으면 에러발생
+
+cfgrs:SECONDARY> db.post.find()
+{ "_id" : ObjectId("6227f43699c75817098098d8"), "title" : "1", "author" : "2" }
+{ "_id" : ObjectId("6227f4fa99c75817098098dc"), "title" : "1", "author" : "2" }
+{ "_id" : ObjectId("6227f52699c75817098098dd"), "title" : "1", "author" : "2" }
+```
+
+## mapReduce
+
+map + reduce 개념
+
+```js
+> db.collection.mapReduce(
+  <map>
+  ,<reduce>
+  {
+    out: <collection>
+    ,query:<document>
+    ,sort:<document>
+    ,limit:<number>
+    ,finalize:<function>
+    ,scope:<document>
+    ,jsMode:<boolean>
+    ,verbose:<boolean>
+  }
+)
+```
+
+* document reset
+
+```js
+> db.post.remove({})
+
+> db.post.insert([
+  {like: 1, category: 'a'},
+  {like: 2, category: 'a'},
+  {like: 3, category: 'a'},
+  {like: 2, category: 'a'},
+  {like: 2, category: 'a'},
+  {like: 5, category: 'a'},
+  {like: 6, category: 'a'},
+  {like: 9, category: 'a'},
+  {like: 0, category: 'a'},
+  {like: 1, category: 'b'},
+  {like: 2, category: 'b'},
+  {like: 3, category: 'c'},
+  {like: 2, category: 'c'},
+  {like: 2, category: 'c'},
+  {like: 5, category: 'c'},
+  {like: 6, category: 'd'},
+  {like: 9, category: 'd'},
+  {like: 0, category: 'd'},
+  {like: 2, category: 'c'},
+  {like: 2, category: 'c'},
+  {like: 5, category: 'c'},
+  {like: 6, category: 'd'},
+  {like: 9, category: 'd'},
+  {like: 0, category: 'd'},
+])
+```
+
+```js
+> var map = function() {
+    // category를 키로 like를 배열로 만들어줌
+    // 첫 번째 인자는 key, 두 번째 인자는 values
+    emit(this.category, this.like)    
+}
+
+// map에서 emit으로 호출한 값 전달받음
+> var reduce = function (key, values) {
+  return {
+    category: key, likes: Array.sum(values)
+  }
+}
+
+> db.post.mapReduce(
+    map, reduce,
+    "like_total_cnt"
+)
+
+{ "result" : "like_total_cnt", "ok" : 1 }
+```
+
+```js
+> db.like_total_cnt.find()
+
+{ "_id" : "a", "value" : { "category" : "a", "likes" : 30 } }
+{ "_id" : "b", "value" : { "category" : "b", "likes" : 3 } }
+{ "_id" : "d", "value" : { "category" : "d", "likes" : 30 } }
+{ "_id" : "c", "value" : { "category" : "c", "likes" : 21 } }
+```
+
+map은 document(row) 갯수 만큼 emit을 호출
+
+여기서 this는 참조중인 document를 의미
+
+emit은 첫 번째 인자로 key를 두 번째 인자로 value를 전달
+
+emit은 동일한 key에 대해서 value를 배열로 만듬
+ 
+document에서 category와 like를 emit에 전달하면 다음과 같은 형태가 됨
+
+```js
+첫 번째 map 호출
+{
+  a: [1]
+}
+
+두 번째 map 호출
+{
+  a: [1, 2]
+}
+
+세 번째 map 호출
+{
+  a: [1, 2, 3]
+}
+```
+
+document의 수만큼 map이 호출되어 이러한 구조로 데이터가 만들어 짐
+
+category: [like] 형태로 오브젝트가 생성 
+
+이 결과는 reduce로 들어감 
+
+reduce는 key 갯수만큼 호출되며 key와 그 배열을 reduce로 전달
+
+reduce의 return값은 value에 매핑
+
+그 결과를 mapReduce의 세 번째 인자에 전달된 out에 따라 새로운 컬렉션을 만들거나 병합(merge)
+
+* finalize 활용
+
+```js
+> var finalize = function (key, value) {
+  return value.likes * 10;
+};
+
+> db.post.mapReduce(
+    map, reduce,
+    {
+      out: { merge: "like_total_cnt" },
+      finalize: finalize,
+    }
+)
+
+{ "result" : "like_total_cnt", "ok" : 1 }
+```
+
+merge 옵션은 넣거나 뺼 수 있음
+
+```js
+> db.like_total_cnt.find()
+{ "_id" : "a", "value" : 300 }
+{ "_id" : "b", "value" : 30 }
+{ "_id" : "d", "value" : 300 }
+{ "_id" : "c", "value" : 210 }
+```
+
+* query 활용
+
+```js
+> db.post.mapReduce(
+    map, reduce,
+    {
+      out: "like_total_cnt",
+      query: { like : 0 },
+      finalize: finalize,
+    }
+)
+
+{ "result" : "like_total_cnt", "ok" : 1 }
+```
+
+```js
+> db.like_total_cnt.find()
+{ "_id" : "a", "value" : 0 }
+{ "_id" : "d", "value" : 0 }
+```

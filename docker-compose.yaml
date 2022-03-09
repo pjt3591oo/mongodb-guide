@@ -1,0 +1,35 @@
+version: '3'
+
+services:
+
+  cfgsvr1:
+    container_name: mongodb.mung1.com
+    image: mongo
+    command: mongod --configsvr --replSet cfgrs --port 27017 --dbpath /data/db
+    ports:
+      - 40001:27017
+    volumes:
+      - mung1:/data/db
+
+  cfgsvr2:
+    container_name: mongodb.mung2.com
+    image: mongo
+    command: mongod --configsvr --replSet cfgrs --port 27017 --dbpath /data/db
+    ports:
+      - 40002:27017
+    volumes:
+      - mung2:/data/db
+
+  cfgsvr3:
+    container_name: mongodb.mung3.com
+    image: mongo
+    command: mongod --configsvr --replSet cfgrs --port 27017 --dbpath /data/db
+    ports:
+      - 40003:27017
+    volumes:
+      - mung3:/data/db
+
+volumes:
+  mung1: {}
+  mung2: {}
+  mung3: {}
